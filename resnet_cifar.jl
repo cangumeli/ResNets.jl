@@ -62,7 +62,7 @@ end
 
 # TODO: add preactivation setting
 function create_model(n::Int, preactivation=false)
-    model = ResNet(params=Any[], grads=Any[], n=n, preactivation=preactivetion)
+    model = ResNet(params=Any[], grads=Any[], n=n, preactivation=preactivation)
     add_params!(model, init_conv_params(3, 3, 3, 16))
     for i = 1:2n
         add_params!(model, init_conv_params(3, 3, 16, 16))
