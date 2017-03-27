@@ -4,17 +4,17 @@ using Knet
 export ResNetCifar2, loss, predict, init_params
 
 # TODO: refactor this config to a mutatable file
-global gpu = true
+global _gpu = false
 global dtype = Float32
 global bmomentum = dtype(0.1)
 global beps = .0001
-global n = 18
+global n = 5
 global s = Any[]
 global wdecay=.0001
 
 function init_conv_param(height, width, input, output)
     w = randn(dtype, height, width, input, output) / dtype(sqrt(2.0 / (height * width * output)))
-    if gpu
+    if _gpu
         w = convert(KnetArray{dtype}, w)
     end
     return w
@@ -23,7 +23,7 @@ end
 function init_fc_param(input, output)
     w = randn(output, input) / dtype(sqrt(2.0 / output * input))
     b = zeros(output, 1)
-    if gpu
+    if _gpu
         w = convert(KnetArray{dtype}, w)
         b = convert(KnetArray{dtype}, b)
     end
@@ -33,7 +33,7 @@ end
 function init_batchnorm_param(channels)
     gamma = ones(dtype, 1, 1, channels, 1)
     beta = ones(dtype, 1, 1, channels, 1)
-    if gpu
+    if _gpu
         gamma = convert(KnetArray{dtype}, gamma)
         beta = convert(KnetArray{dtype}, beta)
     end
@@ -70,7 +70,7 @@ function init_params(;reset_stat=true)
         push!(params, param)
     end
     push!(stats, init_stat(32))
-    
+
     for i = 1:(2n-1)
         push!(params, init_conv_param(3, 3, 32, 32))
         for param in init_batchnorm_param(32)
@@ -94,7 +94,8 @@ function init_params(;reset_stat=true)
         push!(stats, init_stat(64))
     end
     # fcs = init_fc_param(16*16*16, 10)
-    fcs = init_fc_param(4 * 4 * 64, 10)
+    # fcs = init_fc_param(4 * 4 * 64, 10)
+    fcs = init_fc_param(64, 10)
     for f in fcs
         push!(params, f)
     end
@@ -102,8 +103,8 @@ function init_params(;reset_stat=true)
 end
 
 function init_stat(depth)
-    running_mean = gpu ? convert(KnetArray{dtype}, zeros(dtype, 1, 1, depth, 1)) : zeros(1, 1, depth, 1)
-    running_var = gpu ? convert(KnetArray{dtype}, zeros(dtype, 1, 1, depth, 1)) : zeros(dtype, 1, 1, depth, 1)
+    running_mean = _gpu ? convert(KnetArray{dtype}, zeros(dtype, 1, 1, depth, 1)) : zeros(1, 1, depth, 1)
+    running_var = _gpu ? convert(KnetArray{dtype}, zeros(dtype, 1, 1, depth, 1)) : zeros(dtype, 1, 1, depth, 1)
     return Dict(:running_mean => running_mean, :running_var => running_var)
 end
 
@@ -125,7 +126,7 @@ function sbatch_norm(gamma, beta, x, stats; mode=:train)
     xnorm = (x .- mu) ./ sqrt(var .+ beps)
     return gamma .* xnorm .+ beta
 end
-              
+
 # One residual layer for testing
 function predict(w, x; mode=:train)
     # println(6n+2)
@@ -135,6 +136,8 @@ function predict(w, x; mode=:train)
     res = x
     wstart=4
     for i = 1:2n
+      # println("iter1:", i)
+      #println("iter-1:", size(w[wstart]))
         x = conv4(w[wstart], x; padding=1)
         x = sbatch_norm(w[wstart+1], w[wstart+2], x, s[i+1]; mode=mode)
         x = relu(x)
@@ -148,6 +151,8 @@ function predict(w, x; mode=:train)
     res = conv4(w[wstart], res; stride=2) # bottleneck
     wstart += 1
     for i = 1:2n
+      # println("iter2:", i)
+      #println("iter-2:", size(w[wstart]))
         x = conv4(w[wstart], x; padding=1,
                   stride=1+(i==1))
         x = sbatch_norm(w[wstart+1], w[wstart+2], x, s[2n+i+1]; mode=mode)
@@ -162,6 +167,8 @@ function predict(w, x; mode=:train)
     res = conv4(w[wstart], res; stride=2) # bottleneck
     wstart += 1
     for i = 1:2n
+      # println("iter3:", i)
+      #println("iter-3:", size(w[wstart]))
         x = conv4(w[wstart], x; padding=1,
                   stride=1+(i==1))
         x = sbatch_norm(w[wstart+1], w[wstart+2], x, s[4n+i+1]; mode=mode)
@@ -172,7 +179,7 @@ function predict(w, x; mode=:train)
             res = x
         end
     end
-    x = pool(x; mode=2)
+    x = pool(x; mode=2, window=(8, 8))
     return w[end-1] * mat(x) .+ w[end]
 end
 
@@ -190,35 +197,30 @@ end
 
 lossgradient = grad(loss)
 
-function accuracy(w, dtst)
+function accuracy(w, dtst; pred=predict, minibatch=500, print_stages=false)
     x, y = dtst
-    println(typeof(x))
     ncorrect = 0
-    println(gpu)
-    for i = 1:100:size(x, 4)
-        x_ = x[:, :, :, i:i+99]
-        y_ = y[:, i:i+99]
-        if gpu
-            x_ = convert(KnetArray{dtype}, x_)
-            y_ = convert(KnetArray{dtype}, y_)
-        end
-        ypred = predict(w, x_; mode=:test)
-        
-        ncorrect += sum(y_ .* (ypred .== maximum(ypred,1)))
+    for i = 1:minibatch:size(y,2)
+      x_ = x[:,:,:, i:i+minibatch-1]
+      y_ =  y[:, i:i+minibatch-1]
+      ypred = predict(w, x_)
+      ncorrect += sum(y_ .* (ypred .== maximum(ypred, 1)))
+      if print_stages
+         println("ncorrect: ", ncorrect, "/", i+minibatch-1)
+      end
     end
-    # println(ncorrect)
-    return ncorrect / size(x, 4)
+    return ncorrect / size(y, 2)
 end
 
 function test()
-    global n = 1
+    #global n = 10
     w = init_params()
-    #=for p in w
+    for p in w
         println(size(p))
-    end=#
+    end
     x = rand(dtype, 32, 32, 3, 128)
     x .-= mean(x)
-    if gpu
+    if _gpu
         x = convert(KnetArray{Float32}, x)# rand(32, 32, 3, 128))
     end
     res = predict(w, x)

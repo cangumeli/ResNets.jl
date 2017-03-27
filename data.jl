@@ -19,9 +19,14 @@ function cifar10(dir=nothing, onehot=true; dtype = Float32)
 end
 
 function toonehot(ytrnraw, numclass; dtype=Float32)
-    y = zeros(dtype, numclass, length(ytrnraw))
-    y[ytrnraw[:], 1:length(ytrnraw)] = 1.0
-    return y
+    yonehot = zeros(dtype, numclass, length(ytrnraw))
+    # println(ytrnraw)
+    for (i, y) in enumerate(ytrnraw)
+      # println(i," ", y)
+      yonehot[y, i] = 1.0
+   end
+    #y[ytrnraw[:], 1:length(ytrnraw)] = 1.0
+    return yonehot
 end
 
 end
