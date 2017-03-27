@@ -103,7 +103,7 @@ function init_params(;reset_stat=true)
 end
 
 function init_stat(depth)
-    running_mean = _gpu ? convert(KnetArray{dtype}, zeros(dtype, 1, 1, depth, 1)) : zeros(1, 1, depth, 1)
+    running_mean = _gpu ? convert(KnetArray{dtype}, zeros(dtype, 1, 1, depth, 1)) : zeros(dtype, 1, 1, depth, 1)
     running_var = _gpu ? convert(KnetArray{dtype}, zeros(dtype, 1, 1, depth, 1)) : zeros(dtype, 1, 1, depth, 1)
     return Dict(:running_mean => running_mean, :running_var => running_var)
 end
@@ -197,13 +197,13 @@ end
 
 lossgradient = grad(loss)
 
-function accuracy(w, dtst; pred=predict, minibatch=500, print_stages=false)
+function accuracy(w, dtst; pred=predict, minibatch=500, print_stages=false, mode=:test)
     x, y = dtst
     ncorrect = 0
     for i = 1:minibatch:size(y,2)
       x_ = x[:,:,:, i:i+minibatch-1]
       y_ =  y[:, i:i+minibatch-1]
-      ypred = predict(w, x_)
+      ypred = predict(w, x_; mode=mode)#; mode=:test)
       ncorrect += sum(y_ .* (ypred .== maximum(ypred, 1)))
       if print_stages
          println("ncorrect: ", ncorrect, "/", i+minibatch-1)
@@ -224,7 +224,7 @@ function test()
         x = convert(KnetArray{Float32}, x)# rand(32, 32, 3, 128))
     end
     res = predict(w, x)
-    println("\n\n")
+    # println("\n\n")
     return res
     # return predict(w, x, 15, s)
 end
