@@ -33,15 +33,18 @@ function main(args="")
     # Some global configs do not change here
     println("opts=",[(k,v) for (k,v) in o]...)
     ((xtrn, ytrn), (xtst, ytst)) = data.cifar10()
+    mean_trn = imgproc.mean_subtract!(xtrn; mode=:pixel)
+    xtst .-= mean_trn
     xtrn = mat(xtrn)
     xtst = mat(xtst)
-    println(size(xtrn))
+    # println("Mean trn", size(mean_trn))
+
+    # println(size(xtrn))
     #dtrn = minibatch(xtrn, ytrn, o[:batchsize])
     #dtst = minibatch(xtst, ytst, o[:batchsize])
     w = init_params(size(xtrn, 1), size(ytrn,1))
     # helper function to see how your training goes on.
     # report(epoch)=println((:epoch,epoch,:trn,accuracy(w,dtrn),:tst,accuracy(w,dtst)))
-
     train(w, (xtrn, ytrn), (xtst, ytst))
     return w
 end
@@ -118,3 +121,5 @@ Use ReLU nonlinearty at each layer except the last one.
 function predict(w,x)
    w[1]' * x .+ w[2]
 end
+
+main()
