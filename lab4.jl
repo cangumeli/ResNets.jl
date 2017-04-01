@@ -21,12 +21,13 @@ function main(args="")
         ("--epochs"; arg_type=Int; default=10; help="number of epoch ")
         ("--batchsize"; arg_type=Int; default=100; help="size of minibatches")
         # ("--hidden"; nargs='*'; arg_type=Int; help="sizes of hidden layers, e.g. --hidden 128 64 for a net with two hidden layers")
-        ("--lr"; arg_type=Float64; default=0.15; help="learning rate")
+        ("--lr"; arg_type=Float32; default=Float32(0.001); help="learning rate")
         # ("--winit"; arg_type=Float64; default=0.1; help="w initialized with winit*randn()")
         ("--model"; arg_type=Int; default=0; help="model to train")
         ("--trn_buf"; arg_type=Bool; default=false; help="print a buffer of training accuracies")
         ("--print_acc"; arg_type=Bool; default=false; help="Print accuracy")
         ("--optim"; arg_type=String; default="sgd"; help="sgd or adam")
+        ("--momentum"; arg_type=Float32; default=Float32(0.9); help="momentum")
     end
 
         #=
@@ -60,14 +61,15 @@ function main(args="")
     (xtrn, ytrn) = dtr
     #println(ytrn)
     (xtst, ytst) = dts
-    # mn = imgproc.mean_subtract!(xtrn;mode=:instance)
-    mnt = mean(xtrn, 4)
-    xtrn .-= mnt
+    mnt = imgproc.mean_subtract!(xtrn;mode=:pixel)
+    #mnt = mean(xtrn, 4)
+    #xtrn .-= mnt
     xtst .-= mnt
-    # imgproc.mean_subtract!(xtst;mode=:instance)
+    #imgproc.mean_subtract!(xtst;mode=:instance)
     println(size(xtrn))
     println(size(xtst))
-    #xtrn = xtrn[:, :, :, shuffle(1:size(xtrn, 4))]
+    
+    # xtrn = xtrn[:, :, :, shuffle(1:size(xtrn, 4))]
     dtrn = minibatch(xtrn, ytrn, o[:batchsize])
     dtst = minibatch(xtst, ytst, o[:batchsize])
     # Main part of our training process
@@ -77,7 +79,10 @@ function main(args="")
     else
         model = model1
     end
-    train(dtrn, dtst; epochs=o[:epochs], model=model, buf=o[:trn_buf], print_report=o[:print_acc], lr=o[:lr], optimizer=o[:optim])
+    train(dtrn, dtst; epochs=o[:epochs], model=model,
+      buf=o[:trn_buf], print_report=o[:print_acc],
+      lr=o[:lr], momentum=o[:momentum], optimizer=o[:optim],
+   )
     #= @time for epoch=1:o[:epochs]
         train(w, dtrn,o[:lr])
         report(epoch)
@@ -91,28 +96,6 @@ function minibatch(X, Y, bs)
       push!(data, mbatch)
    end
    return data
-end
-
-#=function minibatch(X, Y, bs; atype=Array{Float32})
-    #takes raw input (X) and gold labels (Y)
-    #returns list of minibatches (x, y)
-    data = Any[]
-    # YOUR CODE HERE
-    for i=1:bs:size(X,2)
-        mbatch = map(data->convert(atype, data), (X[:, i:i+bs-1], Y[:, i:i+bs-1]))
-        push!(data, mbatch)
-    end
-    #YOUR CODE ENDS HERE
-    return data
-end=#
-
-function minibatch4(x, y, batchsize; atype=Array{Float32})
-    data = minibatch(x,y,batchsize; atype=atype)
-    for i=1:length(data)
-        (x,y) = data[i]
-        data[i] = (reshape(x, (28,28,1,batchsize)), y)
-    end
-    return data
 end
 
 # Model for question 5
@@ -203,7 +186,7 @@ function modelgrad(model)
     return grad(loss)
 end
 
-function train(dtrn, dtst; epochs=10, model=model1, print_report=true, buf=false, optimizer="sgd", lr=0.15)
+function train(dtrn, dtst; epochs=10, model=model1, print_report=true, buf=false, optimizer="sgd", lr=0.001, momentum=0.9)
     # helper function to see how your training goes on.
     # initalize weights of your model
     trn_buf = buf && Any[] # Buffer format for plotting
@@ -220,7 +203,7 @@ function train(dtrn, dtst; epochs=10, model=model1, print_report=true, buf=false
     if optimizer == "adam"
         prms = map(x->Adam(), w)
     else
-        prms = map(x->Sgd(lr=lr), w)
+        prms = map(x->Momentum(lr=lr, gamma=momentum), w)
     end
     for epoch = 1:epochs
       shuffle!(dtrn)
@@ -260,20 +243,5 @@ function accuracy(w,dtst; model=model1)
     # println("")
     return (ncorrect / ninstance, nloss / length(dtst))
 end
-function loaddata()
-    info("Loading MNIST...")
-    xtrn = gzload("train-images-idx3-ubyte.gz")[17:end]
-    xtst = gzload("t10k-images-idx3-ubyte.gz")[17:end]
-    ytrn = gzload("train-labels-idx1-ubyte.gz")[9:end]
-    ytst = gzload("t10k-labels-idx1-ubyte.gz")[9:end]
-    return (xtrn, ytrn, xtst, ytst)
-end
 
-function gzload(file; path="$file", url="http://yann.lecun.com/exdb/mnist/$file")
-    isfile(path) || download(url, path)
-    f = gzopen(path)
-    a = @compat read(f)
-    close(f)
-    return(a)
-end
 main()
