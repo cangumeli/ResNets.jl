@@ -25,9 +25,10 @@ function main(args="")
         # ("--winit"; arg_type=Float64; default=0.1; help="w initialized with winit*randn()")
         ("--model"; arg_type=Int; default=0; help="model to train")
         ("--trn_buf"; arg_type=Bool; default=false; help="print a buffer of training accuracies")
-        ("--print_acc"; arg_type=Bool; default=false; help="Print accuracy")
+        ("--print_period"; arg_type=Int; default=1000; help="Print accuracy in n iters")
         ("--optim"; arg_type=String; default="sgd"; help="sgd or adam")
         ("--momentum"; arg_type=Float32; default=Float32(0.9); help="momentum")
+        ("--augment"; arg_type=Bool; default=true; help="Whether or not to augment the training data")
     end
 
         #=
@@ -52,21 +53,23 @@ function main(args="")
     #xtrn .-= mnt
     xtst .-= mnt=#
     #imgproc.mean_subtract!(xtst;mode=:instance)
-    dtrn, dval, dtst = loaddata()
+    dtrn, dtrn_, dval, dtst = loaddata(;augment=o[:augment], dtype=Array{Float32})
+    println("Data is loaded...")
     # xtrn = xtrn[:, :, :, shuffle(1:size(xtrn, 4))]
     # dtrn = minibatch(xtrn, ytrn, o[:batchsize])
     # dtst = minibatch(xtst, ytst, o[:batchsize])
-
-    w, model_ = train(dtrn, dval; model=model, bsize=o[:batchsize],
+    w, model_ = train(dtrn_, dval; model=model, bsize=o[:batchsize],
       #buf=o[:trn_buf], print_report=o[:print_acc],
-      lr=o[:lr], momentum=o[:momentum], iters=o[:iters]
+      lr=o[:lr], momentum=o[:momentum], iters=o[:iters], augmented=o[:augment],
+      actual_trn = dtrn, print_period=o[:print_period]
    )
    println((:tst,accuracy(w,dtst; model=model_)))
 end
 
-function loaddata(;nval=5000)
+function loaddata(;nval=5000, augment=true, dtype=Array{Float32})
    dtr, dts = data.cifar10()
    (xtrn, ytrn) = dtr
+   (xtst, ytst) = dts
    # train-val split
    ntrain = size(ytrn, ndims(ytrn))
    sample = shuffle(1:ntrain)
@@ -74,15 +77,20 @@ function loaddata(;nval=5000)
    trn = sample[(nval+1):ntrain]
    xval, yval = xtrn[:, :, :, val], ytrn[:, val]
    xtrn, ytrn = xtrn[:, :, :, trn], ytrn[:, trn]
-   # load test
-   (xtst, ytst) = dts
+
    mnt = imgproc.mean_subtract!(xtrn;mode=:pixel)
    xtst .-= mnt
    xval .-= mnt
+   xtrn_augmented = xtrn
+   if augment
+      xtrn_augmented = zeros(36, 36, size(xtrn, 3), size(xtrn, 4))
+      xtrn_augmented[3:34, 3:34, :, :] = xtrn
+      xtrn_augmented = convert(dtype, xtrn_augmented)
+   end
    println(size(xtrn))
    println(size(xtst))
    println(size(xval))
-   return ((xtrn, ytrn), (xval, yval), (xtst, ytst))
+   return (xtrn, ytrn),(xtrn_augmented, ytrn), (xval, yval), (xtst, ytst)
 end
 
 # My 100% accurate model (hopefully)
@@ -139,20 +147,26 @@ function modelgrad(model)
     return grad(model[3])
 end
 
-function next_batch(x, y, bs)
+function next_batch(x, y, bs; augmented=true)
    batch_indices = rand(1:size(x, 4), bs)
-   return x[:, :, :, batch_indices], y[:, batch_indices]
+   x, y =  x[:, :, :, batch_indices], y[:, batch_indices]
+   if augmented
+      rstart = rand(1:4)
+      cstart = rand(1:4)
+      x = x[rstart:rstart+32, cstart:cstart+32, :, :]
+   end
+   return x, y
 end
 
-function train(dtrn, dtst; iters=15000, model=model, bsize=32, print_period=1000, lr=0.001, momentum=0.9)
+function train(dtrn, dtst; iters=15000, model=model, bsize=32, print_period=1000, lr=0.001, momentum=0.9, augmented=true, actual_trn=nothing)
    weights, predict, loss = model()
    model = (weights, predict, loss)
-   report(iter)=println((:iter,iter,:trn,accuracy(w,dtrn; model=model),:val,accuracy(w,dtst; model=model)))
+   report(iter)=println((:iter,iter,:trn,accuracy(w,actual_trn; model=model),:val,accuracy(w,dtst; model=model)))
     w = weights()
     lossgrad = modelgrad(model)
     prms = map(x->Momentum(lr=lr, gamma=momentum), w)
     for i = 1:iters
-      x, y = next_batch(dtrn[1], dtrn[2], bsize)
+      x, y = next_batch(dtrn[1], dtrn[2], bsize; augmented=augmented)
       g = lossgrad(w, x, y)
       update!(w, g, prms)
       if i % print_period == 0
