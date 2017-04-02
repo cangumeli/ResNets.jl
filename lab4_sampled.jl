@@ -18,7 +18,7 @@ function main(args="")
     =#
     s = ArgParseSettings()
     @add_arg_table s begin
-        ("--epochs"; arg_type=Int; default=10; help="number of epoch ")
+        ("--iters"; arg_type=Int; default=150000; help="number of iterations ")
         ("--batchsize"; arg_type=Int; default=100; help="size of minibatches")
         # ("--hidden"; nargs='*'; arg_type=Int; help="sizes of hidden layers, e.g. --hidden 128 64 for a net with two hidden layers")
         ("--lr"; arg_type=Float32; default=Float32(0.001); help="learning rate")
@@ -43,26 +43,46 @@ function main(args="")
     println("opts=",[(k,v) for (k,v) in o]...)
     o[:seed] = 123
     srand(o[:seed])
-    dtr, dts = data.cifar10()
+    #=dtr, dts = data.cifar10()
     (xtrn, ytrn) = dtr
     #println(ytrn)
     (xtst, ytst) = dts
     mnt = imgproc.mean_subtract!(xtrn;mode=:pixel)
     #mnt = mean(xtrn, 4)
     #xtrn .-= mnt
-    xtst .-= mnt
+    xtst .-= mnt=#
     #imgproc.mean_subtract!(xtst;mode=:instance)
-    println(size(xtrn))
-    println(size(xtst))
-
+    dtrn, dval, dtst = loaddata()
     # xtrn = xtrn[:, :, :, shuffle(1:size(xtrn, 4))]
     # dtrn = minibatch(xtrn, ytrn, o[:batchsize])
     # dtst = minibatch(xtst, ytst, o[:batchsize])
 
-    train((xtrn, ytrn), (xtst, ytst); model=model, bsize=o[:batchsize],
+    w, model_ = train(dtrn, dval; model=model, bsize=o[:batchsize],
       #buf=o[:trn_buf], print_report=o[:print_acc],
-      lr=o[:lr], momentum=o[:momentum]
+      lr=o[:lr], momentum=o[:momentum], iters=o[:iters]
    )
+   println((:tst,accuracy(w,dtst; model=model_)))
+end
+
+function loaddata(;nval=5000)
+   dtr, dts = data.cifar10()
+   (xtrn, ytrn) = dtr
+   # train-val split
+   ntrain = size(ytrn, ndims(ytrn))
+   sample = shuffle(1:ntrain)
+   val = sample[1:nval]
+   trn = sample[(nval+1):ntrain]
+   xval, yval = xtrn[:, :, :, val], ytrn[:, val]
+   xtrn, ytrn = xtrn[:, :, :, trn], ytrn[:, trn]
+   # load test
+   (xtst, ytst) = dts
+   mnt = imgproc.mean_subtract!(xtrn;mode=:pixel)
+   xtst .-= mnt
+   xval .-= mnt
+   println(size(xtrn))
+   println(size(xtst))
+   println(size(xval))
+   return ((xtrn, ytrn), (xval, yval), (xtst, ytst))
 end
 
 # My 100% accurate model (hopefully)
@@ -104,15 +124,10 @@ function model(dtype=Array{Float32})
         # println(size(x2))
         x3 = relu(w[5] * mat(x2) .+ w[6])
         x4 = relu(w[7] * x3 .+ w[8])
-        w[9] * x4 .+ w[10]
+        w[end-1] * x4 .+ w[end]
         # return w[5] * mat(x2) .+ w[6]
     end
 
-    #_, _, loss = model0()
-    #=function loss(w,x,ygold)
-        scores = predict(w, x)
-        return -sum(ygold .* logp(scores, 1)) ./ size(x, 2)
-    end=#
     function loss(w,x,ygold)
         scores = predict(w, x)
         return -sum(ygold .* logp(scores, 1)) ./ size(x, 4)
@@ -121,8 +136,7 @@ function model(dtype=Array{Float32})
 end
 
 function modelgrad(model)
-    _, _, loss = model()
-    return grad(loss)
+    return grad(model[3])
 end
 
 function next_batch(x, y, bs)
@@ -131,8 +145,9 @@ function next_batch(x, y, bs)
 end
 
 function train(dtrn, dtst; iters=15000, model=model, bsize=32, print_period=1000, lr=0.001, momentum=0.9)
-   report(iter)=println((:iter,iter,:trn,accuracy(w,dtrn; model=model),:tst,accuracy(w,dtst; model=model)))
-    weights, predict, loss = model()
+   weights, predict, loss = model()
+   model = (weights, predict, loss)
+   report(iter)=println((:iter,iter,:trn,accuracy(w,dtrn; model=model),:val,accuracy(w,dtst; model=model)))
     w = weights()
     lossgrad = modelgrad(model)
     prms = map(x->Momentum(lr=lr, gamma=momentum), w)
@@ -144,10 +159,11 @@ function train(dtrn, dtst; iters=15000, model=model, bsize=32, print_period=1000
          report(i)
       end
    end
+   return w, model
 end
 
 function accuracy(w,dtst; model=model)
-    _, predict, loss = model()
+    _, predict, loss = model
     ncorrect = 0
     ninstance = 0
     nloss = 0
