@@ -29,6 +29,7 @@ function main(args="")
         ("--optim"; arg_type=String; default="sgd"; help="sgd or adam")
         ("--momentum"; arg_type=Float32; default=Float32(0.9); help="momentum")
         ("--augment"; arg_type=Bool; default=true; help="Whether or not to augment the training data")
+        ("--decay"; arg_type=Float32; default=Float32(1e-5); help="weight decay")
     end
 
         #=
@@ -61,7 +62,7 @@ function main(args="")
     w, model_ = train(dtrn_, dval; model=model, bsize=o[:batchsize],
       #buf=o[:trn_buf], print_report=o[:print_acc],
       lr=o[:lr], momentum=o[:momentum], iters=o[:iters], augmented=o[:augment],
-      actual_trn = dtrn, print_period=o[:print_period]
+      actual_trn = dtrn, print_period=o[:print_period], decay=o[:decay]
    )
    println((:tst,accuracy(w,dtst; model=model_)))
 end
@@ -94,7 +95,7 @@ function loaddata(;nval=5000, augment=true, dtype=Array{Float32})
 end
 
 # My 100% accurate model (hopefully)
-function model(dtype=Array{Float32})
+function model(;dtype=Array{Float32}, decay=1e-5)
 
     function weights()
         weights = Any[]
@@ -138,7 +139,11 @@ function model(dtype=Array{Float32})
 
     function loss(w,x,ygold)
         scores = predict(w, x)
-        return -sum(ygold .* logp(scores, 1)) ./ size(x, 4)
+        penalty = 0.0
+        for i = 1:2:length(w)
+           penalty += sum(w[i].^2)
+        end
+        return -sum(ygold .* logp(scores, 1)) ./ size(x, 4) + decay * penalty
     end
     return weights, predict, loss
 end
@@ -155,15 +160,20 @@ function next_batch(x, y, bs; augmented=true)
       for i = 1:bs
          rstart = rand(1:5)
          cstart = rand(1:5)
-         x_[:, :, :, i] = x[rstart:rstart+31, cstart:cstart+31, :, i]
+         p = rand()
+         if p <= .5
+            x_[:, :, :, i] = imgproc.flip_horizontal(x[rstart:rstart+31, cstart:cstart+31, :, i])
+         else
+            x_[:, :, :, i] = x[rstart:rstart+31, cstart:cstart+31, :, i]
+         end
       end
       x = x_
    end
    return x, y
 end
 
-function train(dtrn, dtst; iters=15000, model=model, bsize=32, print_period=1000, lr=0.001, momentum=0.9, augmented=true, actual_trn=nothing)
-   weights, predict, loss = model()
+function train(dtrn, dtst; iters=15000, model=model, bsize=32, print_period=1000, lr=0.001, momentum=0.9, augmented=true, actual_trn=nothing, decay=1e-5)
+   weights, predict, loss = model(;decay=decay)
    model = (weights, predict, loss)
    report(iter)=println((:iter,iter,:trn,accuracy(w,actual_trn; model=model),:val,accuracy(w,dtst; model=model)))
     w = weights()
