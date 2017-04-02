@@ -151,9 +151,13 @@ function next_batch(x, y, bs; augmented=true)
    batch_indices = rand(1:size(x, 4), bs)
    x, y =  x[:, :, :, batch_indices], y[:, batch_indices]
    if augmented
-      rstart = rand(1:4)
-      cstart = rand(1:4)
-      x = x[rstart:rstart+32, cstart:cstart+32, :, :]
+      x_ = convert(typeof(x), zeros(32, 32, size(x,3), size(x,4)))
+      for i = 1:bs
+         rstart = rand(1:5)
+         cstart = rand(1:5)
+         x_[:, :, :, i] = x[rstart:rstart+31, cstart:cstart+31, :, i]
+      end
+      x = x_
    end
    return x, y
 end
