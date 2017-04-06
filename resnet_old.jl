@@ -221,13 +221,13 @@ function train(w, dtrn, dtst; dtype=Array{Float32}, iters=15000, bsize=32, print
             println("iter ", i)
             println(" ")
         end
-        #=if i % 5000 == 0 && lr > 0.01
+        if i % 5000 == 0 && lr > 0.01
             println("Updating learning rate...")
             lr *= 0.5
             for j = 1:length(prms)
                 prms[j].lr += lr
             end
-        end=#
+        end
         if i % print_period == 0
             report(i)
         end
@@ -276,15 +276,15 @@ function accuracy(w,dtst; dtype=Array{Float32}, bmode=:train)
 end
 
 # Model specs
-n = 5
+n = 3
 dtype = KnetArray{Float32}
 dtrn, dtrn_, dval, dtst = loaddata(;augment=true)
-w, s, wranges, sranges, scnts = init_model(;n=n, dtype=dtype)
+w, s, wranges, sranges, scnts = init_model(;dtype=dtype)
 lossgrad = grad(loss)
 
 # Global state service for the use of layers
 global_state = Dict{Any, Any}()
-w = train(w, dtrn_, dval; actual_trn=dtrn, dtype=dtype, bsize=128, iters=20000, print_period=250, augmented=true)
+w = train(w, dtrn_, dval; actual_trn=dtrn, dtype=dtype, bsize=64, iters=20000, print_period=2500, augmented=false)
 #global_state[:nforward] = 0
 println("Final accuracy", accuracy(w, dtst; dtype=dtype, bmode=:test))
 #train(w, dtrn_, dval; actual_trn=dtrn, dtype=dtype, bsize=64, iters=1, print_period=500)
