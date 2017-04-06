@@ -40,30 +40,35 @@ function bnorm(w, x, s, rng; mode=:train, momentum=.9, eps=1e-5)
     x_mu = x .- mu
     sigma2 = sumabs2(x_mu, (1, 2, 4)) ./ (m + 1)
     x_hat = (x_mu) ./ sqrt(sigma2 .+ eps)
-    if false && haskey(global_state, :nforward)
-        k = global_state[:nforward]
-        s[rng[1]] = (k * s[rng[1]] + AutoGrad.getval(mu)) / (k + 1)
-        s[rng[2]] = (k * s[rng[2]] + AutoGrad.getval(sigma2)) / (k + 1)
-    else
-        s[rng[1]] = momentum * s[rng[1]] + (1 - momentum) * AutoGrad.getval(mu)
-        s[rng[2]] = momentum * s[rng[2]] + (1 - momentum) * AutoGrad.getval(sigma2)
-    end
+    s[rng[1]] = momentum * s[rng[1]] + (1 - momentum) * AutoGrad.getval(mu)
+    s[rng[2]] = momentum * s[rng[2]] + (1 - momentum) * AutoGrad.getval(sigma2)
     return w[1] .* x_hat .+ w[2]
 end
 
-function add_shortcut!(w, s, input, output)
+function add_shortcut!(w, s, input, output; use_conv=true)
    if input == output
       return
    end
-   add_conv!(w, 1, 1, input, output)
-   add_bnorm!(w, s, output)
+    if use_conv
+        add_conv!(w, 1, 1, input, output)
+        add_bnorm!(w, s, output)
+    end
 end
 
-function shortcut(w, x, s, rng; mode=:train)
-   if length(w) == 0
-      return x
-   end
-   return bnorm(w[2:3], conv4(w[1], x; stride=2), s, rng[1:2])
+#= Requires dtype to come from the upper scope =#
+function shortcut(w, x, s, rng; bottleneck=false, mode=:train, use_conv=true)
+    if length(w) == 0
+        if bottleneck && !use_conv
+            x_mat = mat(x)
+            x_padded = vcat(x_mat, dtype(zeros(size(x_mat))))
+            x_ = reshape(x_padded, (size(x)[1:2]..., size(x, 3) * 2, size(x,4)))
+            return pool(x_)
+        end
+        return x
+    end
+    if use_conv
+        return bnorm(w[2:3], conv4(w[1], x; stride=2), s, rng[1:2])
+    end
 end
 
 function add_basic_block!(w, s, input, output; wranges=nothing, sranges=nothing)
@@ -83,11 +88,16 @@ function add_basic_block!(w, s, input, output; wranges=nothing, sranges=nothing)
 end
 
 function basic_block(w, x, s, rng, sc=nothing, scrs=nothing; mode=:train)
-   o1 = conv4(w[1], x; padding=1, stride=1+Int(size(w[1], 4) != size(w[1], 3)))
-   o2 = relu(bnorm(w[2:3], o1, s, rng[1:2]; mode=mode))
-   o3 = conv4(w[4], o2; padding=1)
-   o4 = bnorm(w[5:6], o3, s, rng[3:4]; mode=mode)
-   return relu(o4 .+ shortcut(w[7:end], x, s, rng[5:end]; mode=mode))
+    o1 = conv4(w[1], x; padding=1, stride=1+Int(size(w[1], 4) != size(w[1], 3)))
+    o2 = relu(bnorm(w[2:3], o1, s, rng[1:2]; mode=mode))
+    o3 = conv4(w[4], o2; padding=1)
+    o4 = bnorm(w[5:6], o3, s, rng[3:4]; mode=mode)
+    #println(" ")
+    #println("o4 ", size(o4))
+    #println("x ", size(x))
+    o0 = shortcut(w[7:end], x, s, rng[5:end]; bottleneck=size(o4, 3)!=size(x, 3), mode=mode)
+    #println(size(o4), " ", size(o0)) 
+    return relu(o4 .+ o0)
 end
 
 function init_model(;n=3, dtype=Array{Float32})
@@ -221,24 +231,11 @@ function train(w, dtrn, dtst; dtype=Array{Float32}, iters=15000, bsize=32, print
             println("iter ", i)
             println(" ")
         end
-        #=if i % 5000 == 0 && lr > 0.01
-            println("Updating learning rate...")
-            lr *= 0.5
-            for j = 1:length(prms)
-                prms[j].lr += lr
-            end
-        end=#
         if i % print_period == 0
             report(i)
         end
     end
-    
-    #=for i = 1:1000
-        println("Stat iter ", i)
-        x, _ = next_batch(dtrn[1], dtrn[2], bsize; augmented=augmented, dtype=dtype)
-        resnet(w, x)
-        global_state[:nforward] = i
-    end=#
+   
     return w
 end
 
@@ -276,7 +273,7 @@ function accuracy(w,dtst; dtype=Array{Float32}, bmode=:train)
 end
 
 # Model specs
-n = 5
+n = 9
 dtype = KnetArray{Float32}
 dtrn, dtrn_, dval, dtst = loaddata(;augment=true)
 w, s, wranges, sranges, scnts = init_model(;n=n, dtype=dtype)
@@ -284,7 +281,7 @@ lossgrad = grad(loss)
 
 # Global state service for the use of layers
 global_state = Dict{Any, Any}()
-w = train(w, dtrn_, dval; actual_trn=dtrn, dtype=dtype, bsize=128, iters=20000, print_period=250, augmented=true)
+w = train(w, dtrn_, dval; actual_trn=dtrn, dtype=dtype, bsize=128, iters=20000, print_period=500, augmented=true)
 #global_state[:nforward] = 0
 println("Final accuracy", accuracy(w, dtst; dtype=dtype, bmode=:test))
 #train(w, dtrn_, dval; actual_trn=dtrn, dtype=dtype, bsize=64, iters=1, print_period=500)
