@@ -28,7 +28,7 @@ function add_bnorm!(params, stats, depth)
    push!(stats, ones(1, 1, depth, 1))
 end
 
-function bnorm(w, x, s, rng; mode=:train, momentum=.9, eps=1e-5)
+function bnorm(w, x, s, rng; mode=:train, momentum=.9, eps=1e-9)
     assert(mode in [:train, :test])
     assert(length(rng) == 2)
     if mode == :test
@@ -38,7 +38,7 @@ function bnorm(w, x, s, rng; mode=:train, momentum=.9, eps=1e-5)
     m = size(x, 1) * size(x, 2) * size(x, 4)
     mu = sum(x, (1, 2, 4)) ./ m
     x_mu = x .- mu
-    sigma2 = sumabs2(x_mu, (1, 2, 4)) ./ (m + 1)
+    sigma2 = sumabs2(x_mu, (1, 2, 4)) ./ m
     x_hat = (x_mu) ./ sqrt(sigma2 .+ eps)
     s[rng[1]] = momentum * s[rng[1]] + (1 - momentum) * AutoGrad.getval(mu)
     s[rng[2]] = momentum * s[rng[2]] + (1 - momentum) * AutoGrad.getval(sigma2)
@@ -87,6 +87,22 @@ function add_basic_block!(w, s, input, output; wranges=nothing, sranges=nothing)
    end
 end
 
+function add_basic_block_pre!(w, s, input, output; wranges=nothing, sranges=nothing)
+    start = length(w)+1
+    sstart = length(s)+1
+    add_bnorm!(w, s, input)
+    add_conv!(w, 3, 3, input, output)
+    add_bnorm!(w, output)
+    add_conv!(w, 3, 3, output, output)
+    add_shortcut!(w, s, input, output)
+    if wranges !==nothing
+      push!(wranges, start:length(w))
+   end
+   if sranges !==nothing
+      push!(sranges, sstart:length(s))
+   end
+end
+
 function basic_block(w, x, s, rng, sc=nothing, scrs=nothing; mode=:train)
     o1 = conv4(w[1], x; padding=1, stride=1+Int(size(w[1], 4) != size(w[1], 3)))
     o2 = relu(bnorm(w[2:3], o1, s, rng[1:2]; mode=mode))
@@ -96,11 +112,21 @@ function basic_block(w, x, s, rng, sc=nothing, scrs=nothing; mode=:train)
     #println("o4 ", size(o4))
     #println("x ", size(x))
     o0 = shortcut(w[7:end], x, s, rng[5:end]; bottleneck=size(o4, 3)!=size(x, 3), mode=mode)
-    #println(size(o4), " ", size(o0)) 
+    #println(size(o4), " ", size(o0))
     return relu(o4 .+ o0)
 end
 
-function init_model(;n=3, dtype=Array{Float32})
+function basic_block_pre(w, x, s, rng; mode=:train)
+    o1 = relu(bnorm(w[1:2], x, s, rng[1:2]; mode=mode))
+    o2 = conv4(w[3], x; padding=1)
+    o3 = relu(bnorm(w[4:5], x, s, rng[3:4]; mode=mode))
+    o4 = conv4(w[6], x, s; padding=1)
+    o0 = shortcut(w[7:end], x, s, rng[5:end]; bottleneck=size(o4, 3)!=size(x, 3), mode=mode)
+    return relu(o4 + o0)
+end
+
+function init_model(;n=3, dtype=Array{Float32}, pre=false)
+   add_block! = pre ? add_basic_block_pre! : add_basic_block!
    w = Any[]
    s = Any[]
    ranges = Any[]
@@ -108,15 +134,15 @@ function init_model(;n=3, dtype=Array{Float32})
    add_conv!(w, 3, 3, 3, 16)
    add_bnorm!(w, s, 16)
    for i = 1:n
-      add_basic_block!(w, s, 16, 16; wranges=ranges, sranges=sranges)
+      add_block!(w, s, 16, 16; wranges=ranges, sranges=sranges)
    end
-   add_basic_block!(w, s, 16, 32; wranges=ranges, sranges=sranges)
+   add_block!(w, s, 16, 32; wranges=ranges, sranges=sranges)
    for i = 1:n-1
-      add_basic_block!(w, s, 32, 32; wranges=ranges, sranges=sranges)
+      add_block!(w, s, 32, 32; wranges=ranges, sranges=sranges)
    end
-   add_basic_block!(w, s, 32, 64; wranges=ranges, sranges=sranges)
+   add_block!(w, s, 32, 64; wranges=ranges, sranges=sranges)
    for i = 1:n-1
-      add_basic_block!(w, s, 64, 64; wranges=ranges, sranges=sranges)
+      add_block!(w, s, 64, 64; wranges=ranges, sranges=sranges)
    end
    add_linear!(w, 64, 10)
    w = map(x->convert(dtype, x), w)
@@ -127,10 +153,12 @@ end
 #=
    Requires s, n, wranges and sranges to come from the upper scope
 =#
-function resnet(w, x; mode=:train)
+# FIXME: edit activations for preactivation
+function resnet(w, x; mode=:train, pre=false)
+   block = pre ? basic_block_pre : basic_block
    o = relu(bnorm(w[2:3], conv4(w[1], x; padding=1), s, 1:2 ; mode=mode))
    for i = 1:3n
-      o = basic_block(w[wranges[i]], o, s, sranges[i]; mode=mode)
+       o = block(w[wranges[i]], o, s, sranges[i]; mode=mode)
    end
    return w[end-1] * mat(pool(o; mode=2, window=(8,8))) .+ w[end]
 end
@@ -139,7 +167,7 @@ function result_loss(w, scores, ygold; lambda=0.0001)
     penalty = 0.0
     for i = 1:length(w)
         if size(w[i], ndims(w[i])) != 1
-            penalty += sum(lambda .* (w[i] .* w[i]))
+            penalty += sum(0.5lambda .* (w[i] .* w[i]))
         end
    end
     return -sum(ygold .* logp(scores, 1)) ./ size(ygold, 2)  + penalty
@@ -169,7 +197,7 @@ function loaddata(;nval=5000, augment=true, dtype=Array{Float32})
    trn = sample[(nval+1):ntrain]
    xval, yval = xtrn[:, :, :, val], ytrn[:, val]
    xtrn, ytrn = xtrn[:, :, :, trn], ytrn[:, trn]
-   
+
     mnt = imgproc.mean_subtract!(xtrn;mode=:pixel)
     xtst .-= mnt
     xval .-= mnt
@@ -210,7 +238,7 @@ function next_batch(x, y, bs; augmented=true, dtype=Array{Float32})
 end
 
 function train(w, dtrn, dtst; dtype=Array{Float32}, iters=15000, bsize=32, print_period=1000, lr=0.1,
-               momentum=0.9, augmented=true, actual_trn=nothing, decay=1e-4, reset_cnt=true)
+               momentum=0.9, augmented=true, actual_trn=nothing, decay=1e-4, reset_cnt=true, lr_decay_iter=(32000, 48000))
     #report(iter)=println((:iter,iter,:trn,accuracy(w,actual_trn; dtype=dtype, bmode=:train),:val,accuracy(w,dtst; dtype=dtype, bmode=:test)))
     report(iter)=println((:iter,iter,:trn,accuracy(w,actual_trn; dtype=dtype, bmode=:test),:val,accuracy(w,dtst; dtype=dtype, bmode=:test)))
     prms = map(x->Momentum(lr=lr, gamma=momentum), w)
@@ -224,8 +252,11 @@ function train(w, dtrn, dtst; dtype=Array{Float32}, iters=15000, bsize=32, print
         for j = 1:length(prms)
             update!(w[j], g[j], prms[j])
         end
-        #global_state[:nforward] += 1
-
+        if i in lr_decay_iter
+            for j = 1:length(prms)
+                prms[j].lr *= 0.1
+            end
+        end
         if i % 50 == 0 || i == 1
             #println("stats ", map(x->(sum(x)/length(x)), s))
             println("iter ", i)
@@ -235,7 +266,7 @@ function train(w, dtrn, dtst; dtype=Array{Float32}, iters=15000, bsize=32, print
             report(i)
         end
     end
-   
+
     return w
 end
 
@@ -258,7 +289,7 @@ function accuracy(w,dtst; dtype=Array{Float32}, bmode=:train)
     for i = 1:100:size(Y,2)
         x = convert(dtype, X[:, :, :, i:i+99])
         ygold = convert(dtype, Y[:, i:i+99])
-        
+
         ypred = resnet(w, x; mode=bmode)
         nloss += result_loss(w, ypred, ygold) # diminish the side effects
         if bmode == :train
@@ -273,7 +304,7 @@ function accuracy(w,dtst; dtype=Array{Float32}, bmode=:train)
 end
 
 # Model specs
-n = 9
+n = 5
 dtype = KnetArray{Float32}
 dtrn, dtrn_, dval, dtst = loaddata(;augment=true)
 w, s, wranges, sranges, scnts = init_model(;n=n, dtype=dtype)
@@ -281,7 +312,7 @@ lossgrad = grad(loss)
 
 # Global state service for the use of layers
 global_state = Dict{Any, Any}()
-w = train(w, dtrn_, dval; actual_trn=dtrn, dtype=dtype, bsize=128, iters=20000, print_period=500, augmented=true)
+w = train(w, dtrn_, dval; actual_trn=dtrn, dtype=dtype, bsize=128, iters=64000, print_period=500, augmented=true, lr_decay_iter=(32000, 48000))
 #global_state[:nforward] = 0
 println("Final accuracy", accuracy(w, dtst; dtype=dtype, bmode=:test))
 #train(w, dtrn_, dval; actual_trn=dtrn, dtype=dtype, bsize=64, iters=1, print_period=500)
