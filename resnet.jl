@@ -399,8 +399,9 @@ module ResNet
       return grad(loss)
    end
 
-   function train(;low_power=false)
+   function train()
       dtrn, dtrn_, dval, dtst = loaddata(;augment=true, nval=nval)
+      low_power = Knet.gpu() < 0
       global w, lambda, s, sranges, wranges
       # TODO: make options configurable
       w = train(w, dtrn_, dval; s=s, actual_trn=dtrn, dtype=dtype, bsize=bsize,

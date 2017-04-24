@@ -9,6 +9,6 @@ if _build
     Pkg.build("Knet")
 end
 #TODO: add argument parsing stuff
-resnet = include("resnet3.jl")
+resnet = include("resnet.jl")
 resnet.init(3)
-resnet.train(;low_power=true)
+resnet.train()
