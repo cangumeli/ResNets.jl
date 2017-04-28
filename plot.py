@@ -7,7 +7,6 @@ files = [
 for tf in files:
     title, fname = tf
     with open(fname) as f:
-        a = 'cc'
         lines = filter(lambda x: x.startswith('(:iter'), f.readlines())
         iters = []
         trns = []
@@ -36,7 +35,9 @@ for tf in files:
                 min_tst = tsts[i]
         print "Peak training error rate %.2f"%(min_trn)
         print "Peak test error rate %.2f"%(min_tst)
-        plt.plot(iters, tsts)
+        plt.plot(iters, tsts, label='test error')
+        plt.plot(iters, trns, label='training error')
+        plt.legend()
         plt.title(title)
         plt.xlim(0, iters[-1])
         plt.ylim(0, 100)
