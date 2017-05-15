@@ -10,5 +10,5 @@ if _build
 end
 #TODO: add argument parsing stuff
 resnet = include("resnet.jl")
-resnet.init(3)
+resnet.init(5, nothing, 0)
 resnet.train()
