@@ -8,9 +8,9 @@ type GroupConfig
 end
 
 type ResNetConfig
-   block::Any
+   block::Function
    groups::Array{GroupConfig, 1}
-   block_forward::Any
+   block_forward::Function
 end
 
 shortcut(net, input, output; stride=1) = Conv4(net, 1, 1, input, output; stride=stride, bias=false)
@@ -145,7 +145,11 @@ function create_resnet(config::ResNetConfig, first_conv::Function, num_classes::
          push!(layers, config.block(net, cf.output, cf.output))
       end
    end
-   push!(layers, Linear(net, config.groups[end].output, num_classes))
+   if pre
+      push!(layers, Dict([:fc=>Linear(net, config.groups[end].output, num_classes), :bn=>SBatchNorm(net, config.groups[end].output)]))
+   else
+      push!(layers, Dict([:fc=>Linear(net, config.groups[end].output, num_classes)]))
+   end
 
    function predict(net, x; mode=:train, debug=false)
       o = let
@@ -170,7 +174,10 @@ function create_resnet(config::ResNetConfig, first_conv::Function, num_classes::
       if debug # ImageNet => 7x7, Cifar => 8x8
          println("Size of the feature map: ", size(o)[1:2])
       end
-      return forward(net, layers[end], pool(o; window=size(o)[1:2], mode=2))
+      if pre
+         o = relu(forward(net, layers[end][:bn], x; mode=mode))
+      end
+      return forward(net, layers[end][:fc], pool(o; window=size(o)[1:2], mode=2))
    end
 
    return net, layers, predict
