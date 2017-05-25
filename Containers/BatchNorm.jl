@@ -23,11 +23,12 @@ function forward(net, bn::BatchNorm, x; mode=:train)
    #=if affine
       x = auto_convert(w, x, AutoGrad.getval)
    end=#
-   if typeof(bn.running_mean) !== typeof(AutoGrad.getval(x))
-      bn.running_mean = typeof(x)(bn.running_mean)
+   tx = typeof(AutoGrad.getval(x))
+   if typeof(bn.running_mean) !== tx
+      bn.running_mean = tx(bn.running_mean)
    end
-   if typeof(bn.running_var) !== typeof(AutoGrad.getval(x))
-      bn.running_var = typeof(x)(bn.running_var)
+   if typeof(bn.running_var) !== tx
+      bn.running_var = tx(bn.running_var)
    end
    x_hat = nothing
    if mode == :test

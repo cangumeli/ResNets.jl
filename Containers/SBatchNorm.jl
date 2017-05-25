@@ -20,17 +20,15 @@ function forward(net, bn::SBatchNorm, x; mode=:train)
    assert(mode in [:train, :test])
    w = get_params(net, bn)
    affine = length(w) > 0
-   #=if affine
-      x = auto_convert(w, x, AutoGrad.getval)
-   end=#
-   if typeof(bn.running_mean) !== typeof(AutoGrad.getval(x))
-      bn.running_mean = typeof(x)(bn.running_mean)
+   tx = typeof(AutoGrad.getval(x))
+   if typeof(bn.running_mean) !== tx
+      bn.running_mean = tx(bn.running_mean)
    end
-   if typeof(bn.running_var) !== typeof(AutoGrad.getval(x))
-      bn.running_var = typeof(x)(bn.running_var)
+   if typeof(bn.running_var) !== tx
+      bn.running_var = tx(bn.running_var)
    end
    x_hat = nothing
-   if mode == :test
+   if mode === :test
       x_hat = (x .- bn.running_mean) ./ sqrt(bn.running_var .+ bn.eps)
    else
       # Do the computation
