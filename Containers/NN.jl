@@ -1,0 +1,5 @@
+include("base.jl")
+include("Linear.jl")
+include("Conv4.jl")
+include("SBatchNorm.jl")
+include("BatchNorm.jl")
