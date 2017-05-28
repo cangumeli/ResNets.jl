@@ -6,10 +6,13 @@ softloss(predict::Function) =
    (net, x, ygold) -> -sum(ygold .* logp(predict(net, x), 1)) ./ size(ygold, ndims(ygold))
 
 softloss(net, y, ygold) =
-    -sum(ygold .* logp(y, 1)) ./ size(ygold, 2)
+    -sum(ygold .* logp(y, 1)) ./ size(ygold, ndims(ygold))
 
 ssdloss(predict::Function) =
-   (net, x, ygold) -> -sumabs(ygold .- predict(net, x)) ./ size(y, ndims(y))
+   (net, x, ygold) -> sumabs2(ygold .- predict(net, x)) ./ size(ygold, ndims(ygold))
+
+ssdloss(net, y, ygold) =
+   (net, x, ygold) -> sumabs2(ygold .- y) ./ size(ygold, ndims(ygold))
 
 
 type SGD <: Solver
