@@ -1,4 +1,18 @@
-type SGD
+abstract Solver
+
+grad_taken(grad) = typeof(grad) !== Void
+
+softloss(predict::Function) =
+   (net, x, ygold) -> -sum(ygold .* logp(predict(net, x), 1)) ./ size(ygold, ndims(ygold))
+
+softloss(net, y, ygold) =
+    -sum(ygold .* logp(y, 1)) ./ size(ygold, 2)
+
+ssdloss(predict::Function) =
+   (net, x, ygold) -> -sumabs(ygold .- predict(net, x)) ./ size(y, ndims(y))
+
+
+type SGD <: Solver
    lr::AbstractFloat
    momentum::AbstractFloat
    velocities::Any
@@ -10,8 +24,6 @@ type SGD
     end
 end
 
-#TODO: support undefs
-#TODO: add gradient conservation
 function update_net!(net, grads, solver::SGD)
    if solver.velocities === nothing && solver.momentum > 0
       solver.velocities = []
@@ -22,6 +34,9 @@ function update_net!(net, grads, solver::SGD)
    # Assume l2 regularizatioN
    get_grad(i) = (solver.weight_decay > 0) ? (solver.weight_decay * net[i] + grads[i]) : grads[i]
    for i = 1:length(net)
+      if ~grad_taken(grads[i])
+         continue
+      end
       if solver.momentum == 0
          net[i] -= solver.lr * get_grad(i)
       else
@@ -40,7 +55,9 @@ function update_net!(net, grads, layers, solver::SGD)
       for l in layers
          rng = decay_range(l)
          for i = rng
-            net[i] -= decay * net[i]
+            if grad_taken(grads[i])
+               net[i] -= decay * net[i]
+            end
          end
       end
    end

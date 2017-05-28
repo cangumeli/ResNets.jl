@@ -1,6 +1,5 @@
 type Linear <: Layer
    range::Range{Int}
-   # TODO: support different initialization
    function Linear(net::Net, input::Int, output::Int; bias=true, dtype=Array{Float32})
       s = length(net)+1
       stdv = 1 ./ sqrt(input)
@@ -24,4 +23,18 @@ function forward(net, lin::Linear, x)
       return o1 .+ w[2]
    end
    return o1
+end
+
+function fill_weights!(net, lin::Linear, init::Function)
+   w = get_params(net, lin)[1]
+   copy!(w, typeof(w)(init(size(w))))
+end
+
+function fill_bias!(net, lin::Linear, init::Function)
+   if length(lin.range) < 2
+      warn("Linear layer doesn't have bias")
+      return
+   end
+   w = get_params(net, lin)[2]
+   copy!(w, typeof(w)(init(size(w))))
 end

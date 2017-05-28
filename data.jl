@@ -29,4 +29,10 @@ function toonehot(ytrnraw, numclass; dtype=Float32)
     return yonehot
 end
 
+function next_batch(x, y; dtype=Array{Float32}, bs=128)
+   batch_indices = rand(1:size(x, 4), bs)
+   x_, y_ =  x[:, :, :, batch_indices], y[:, batch_indices]
+   return dtype(x_), dtype(y_)
+end
+
 end

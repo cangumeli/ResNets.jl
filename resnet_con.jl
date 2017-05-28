@@ -76,10 +76,12 @@ function bottleneck_block_forward(net, layers, x; mode=:train)
    return relu(o3 + o0)
 end
 
-function pre_basic_block(net, input, output; stride=1)
+function pre_basic_block(net, input, output; stride=1, first=false)
    layers = Dict{Symbol, Layer}()
    add_shortcut!(layers, net, input, output; stride=stride)
-   layers[:bn1] = SBatchNorm(net, input)
+   if ~first
+      layers[:bn1] = SBatchNorm(net, input)
+   end
    layers[:conv1] = conv3x3(net, input, output; stride=stride)
    layers[:bn2] = SBatchNorm(net, output)
    layers[:conv2] = conv3x3(net, output, output)
@@ -90,7 +92,7 @@ function pre_basic_block_forward(net, layers, x; mode=:train, first=false)
    bnrc(bn, cv, x) = relu(forward(net, layers[cv], forward(net, layers[bn], x; mode=mode)))
    o1 = let
       if first
-         x = relu(forward(net, layers[:bn1], x; mode=mode))
+         #x = relu(forward(net, layers[:bn1], x; mode=mode))
          forward(net, layers[:conv1], x)
       else
          bnrc(:bn1, :conv1, x)
@@ -101,11 +103,13 @@ function pre_basic_block_forward(net, layers, x; mode=:train, first=false)
    return o2 + o0
 end
 
-function pre_bottleneck_block(net, input, output; stride=1)
+function pre_bottleneck_block(net, input, output; stride=1, first=false)
    layers = Dict{Symbol, Layer}()
    add_shortcut!(layers, net, input, output; stride=stride)
    n = Int(output / 4)
-   layers[:bn1] = SBatchNorm(net, input)
+   if ~first
+      layers[:bn1] = SBatchNorm(net, input)
+   end
    layers[:conv1] = Conv4(net, 1, 1, input, n)
    layers[:bn2] = SBatchNorm(net, n)
    layers[:conv2] = conv3x3(net, n, n; stride=stride)
@@ -118,7 +122,7 @@ function pre_bottleneck_block_forward(net, layers, x; mode=:train, first=false)
    bnrc(bn, cv, x) = relu(forward(net, layers[cv], forward(net, layers[bn], x; mode=mode)))
    o1 = let
       if first
-         x = relu(forward(net, layers[:bn1], x; mode=mode))
+         # x = relu(forward(net, layers[:bn1], x; mode=mode))
          forward(net, layers[:conv1], x)
       else
          bnrc(:bn1, :conv1, x)
@@ -140,7 +144,11 @@ function create_resnet(config::ResNetConfig, first_conv::Function, num_classes::
       push!(layers, Dict([:conv=>first_conv(net)]))
    end
    for cf in config.groups
-      push!(layers, config.block(net, cf.input, cf.output; stride=cf.stride))
+      if pre && init_pool !== nothing
+         push!(layers, config.block(net, cf.input, cf.output; stride=cf.stride, first=true))
+      else
+         push!(layers, config.block(net, cf.input, cf.output; stride=cf.stride))
+      end
       for i = 2:cf.repeat
          push!(layers, config.block(net, cf.output, cf.output))
       end
