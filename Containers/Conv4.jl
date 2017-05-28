@@ -39,3 +39,5 @@ function fill_bias!(net, cn::Conv4, init::Function)
    bias = params[2]
    copy!(bias, typeof(bias)(init(size(bias))))
 end
+
+decay_range(l::Conv4) = l.range[1:1]

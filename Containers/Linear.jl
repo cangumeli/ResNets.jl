@@ -38,3 +38,5 @@ function fill_bias!(net, lin::Linear, init::Function)
    w = get_params(net, lin)[2]
    copy!(w, typeof(w)(init(size(w))))
 end
+
+decay_range(l::Linear) = l.range[1:1] # only weights
